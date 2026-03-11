@@ -1,0 +1,151 @@
+// prisma/schema.prisma
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  emailEnc     String
+  phoneEnc     String
+  realNameEnc  String
+  passwordHash String
+  publicKey    String
+  locationLat  Float?
+  locationLng  Float?
+  rating       Float    @default(0)
+  ratingCount  Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  requests         Request[]         @relation("PosterRequests")
+  acceptedRequests Request[]         @relation("HelperRequests")
+  interests        RequestInterest[]
+  sentRatings      Rating[]          @relation("RaterRatings")
+  receivedRatings  Rating[]          @relation("RateeRatings")
+  refreshTokens    RefreshToken[]
+  messages         Message[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+model Request {
+  id           String          @id @default(uuid())
+  posterId     String
+  poster       User            @relation("PosterRequests", fields: [posterId], references: [id])
+  helperId     String?
+  helper       User?           @relation("HelperRequests", fields: [helperId], references: [id])
+  displayName  String
+  title        String
+  description  String
+  category     RequestCategory @default(GENERAL)
+  status       RequestStatus   @default(OPEN)
+  centerLat    Float
+  centerLng    Float
+  radiusMeters Float
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  expiresAt    DateTime?
+
+  interests RequestInterest[]
+  messages  Message[]
+  ratings   Rating[]
+
+  @@map("requests")
+}
+
+// Multiple users can express interest in a single request
+model RequestInterest {
+  id        String         @id @default(uuid())
+  requestId String
+  request   Request        @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User           @relation(fields: [userId], references: [id])
+  status    InterestStatus @default(PENDING)
+  message   String?
+  createdAt DateTime       @default(now())
+
+  @@unique([requestId, userId])
+  @@map("request_interests")
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  requestId  String
+  request    Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  senderId   String
+  sender     User     @relation(fields: [senderId], references: [id])
+  iv         String
+  ciphertext String
+  createdAt  DateTime @default(now())
+
+  @@map("messages")
+}
+
+model Rating {
+  id        String     @id @default(uuid())
+  requestId String
+  request   Request    @relation(fields: [requestId], references: [id])
+  raterId   String
+  rater     User       @relation("RaterRatings", fields: [raterId], references: [id])
+  rateeId   String
+  ratee     User       @relation("RateeRatings", fields: [rateeId], references: [id])
+  stars     Int
+  comment   String?
+  role      RatingRole
+  createdAt DateTime   @default(now())
+
+  @@unique([requestId, raterId])
+  @@map("ratings")
+}
+
+enum RequestStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum InterestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum RequestCategory {
+  GENERAL
+  ERRANDS
+  TECH_HELP
+  MOVING
+  FOOD
+  MEDICAL
+  EDUCATION
+  EMERGENCY
+  PETS
+  HOME_REPAIR
+}
+
+enum RatingRole {
+  POSTER_RATES_HELPER
+  HELPER_RATES_POSTER
+}
