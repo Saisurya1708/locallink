@@ -8,7 +8,16 @@ import { io } from '../index';
 const router = Router();
 const prisma = new PrismaClient();
 
-// Nearby requests
+// Haversine distance in meters
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// Nearby requests - using Haversine (no PostGIS needed)
 router.get('/nearby', requireAuth, apiLimiter,
   [query('lat').isFloat({ min: -90, max: 90 }), query('lng').isFloat({ min: -180, max: 180 })],
   async (req: AuthRequest, res: Response) => {
@@ -19,28 +28,32 @@ router.get('/nearby', requireAuth, apiLimiter,
     const lng = parseFloat(req.query.lng as string);
 
     try {
-      const requests = await prisma.$queryRaw`
-        SELECT
-          r.id, r."displayName", r.title, r.description, r.category, r.status,
-          r."centerLat", r."centerLng", r."radiusMeters", r."createdAt",
-          r."posterId", r."helperId",
-          u.username as "posterUsername", u.rating as "posterRating",
-          ST_Distance(
-            ST_MakePoint(r."centerLng", r."centerLat")::geography,
-            ST_MakePoint(${lng}::float, ${lat}::float)::geography
-          ) AS distance_meters
-        FROM requests r
-        JOIN users u ON u.id = r."posterId"
-        WHERE r.status = 'OPEN'
-          AND ST_DWithin(
-            ST_MakePoint(r."centerLng", r."centerLat")::geography,
-            ST_MakePoint(${lng}::float, ${lat}::float)::geography,
-            r."radiusMeters"
-          )
-          AND (r."expiresAt" IS NULL OR r."expiresAt" > NOW())
-        ORDER BY r."createdAt" DESC LIMIT 100
-      `;
-      return res.json(requests);
+      // Fetch OPEN requests with a rough bounding box first (~500km), then filter precisely
+      const requests = await prisma.request.findMany({
+        where: {
+          status: 'OPEN',
+          expiresAt: { OR: [{ equals: null }, { gt: new Date() }] } as any,
+          centerLat: { gte: lat - 5, lte: lat + 5 },
+          centerLng: { gte: lng - 5, lte: lng + 5 },
+        },
+        include: {
+          poster: { select: { id: true, username: true, rating: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      });
+
+      // Filter by actual radius using Haversine
+      const nearby = requests
+        .map(r => ({
+          ...r,
+          distance_meters: haversineMeters(lat, lng, r.centerLat, r.centerLng),
+        }))
+        .filter(r => r.distance_meters <= r.radiusMeters)
+        .sort((a, b) => a.distance_meters - b.distance_meters)
+        .slice(0, 100);
+
+      return res.json(nearby);
     } catch (e: any) {
       console.error(e);
       return res.status(500).json({ error: 'Failed to fetch requests' });
@@ -85,7 +98,6 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     },
   });
   if (!request) return res.status(404).json({ error: 'Not found' });
-  // Only show interests to poster
   const result = { ...request, interests: request.posterId === req.userId ? request.interests : [] };
   return res.json(result);
 });
@@ -120,7 +132,7 @@ router.delete('/:id/interest', requireAuth, async (req: AuthRequest, res: Respon
   return res.json({ success: true });
 });
 
-// Accept a specific helper (poster only) - opens chat
+// Accept a specific helper
 router.post('/:id/accept/:helperId', requireAuth, apiLimiter, async (req: AuthRequest, res: Response) => {
   const request = await prisma.request.findUnique({ where: { id: req.params.id } });
   if (!request) return res.status(404).json({ error: 'Not found' });

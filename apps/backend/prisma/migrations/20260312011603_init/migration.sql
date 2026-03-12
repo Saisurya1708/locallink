@@ -1,8 +1,8 @@
--- CreateExtension
-CREATE EXTENSION IF NOT EXISTS "postgis";
+-- CreateEnum
+CREATE TYPE "RequestStatus" AS ENUM ('OPEN', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'EXPIRED');
 
 -- CreateEnum
-CREATE TYPE "RequestStatus" AS ENUM ('OPEN', 'CLAIMED', 'APPROVED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'EXPIRED');
+CREATE TYPE "InterestStatus" AS ENUM ('PENDING', 'ACCEPTED', 'REJECTED');
 
 -- CreateEnum
 CREATE TYPE "RequestCategory" AS ENUM ('GENERAL', 'ERRANDS', 'TECH_HELP', 'MOVING', 'FOOD', 'MEDICAL', 'EDUCATION', 'EMERGENCY', 'PETS', 'HOME_REPAIR');
@@ -61,6 +61,18 @@ CREATE TABLE "requests" (
 );
 
 -- CreateTable
+CREATE TABLE "request_interests" (
+    "id" TEXT NOT NULL,
+    "requestId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "status" "InterestStatus" NOT NULL DEFAULT 'PENDING',
+    "message" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "request_interests_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "messages" (
     "id" TEXT NOT NULL,
     "requestId" TEXT NOT NULL,
@@ -93,6 +105,9 @@ CREATE UNIQUE INDEX "users_username_key" ON "users"("username");
 CREATE UNIQUE INDEX "refresh_tokens_token_key" ON "refresh_tokens"("token");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "request_interests_requestId_userId_key" ON "request_interests"("requestId", "userId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "ratings_requestId_raterId_key" ON "ratings"("requestId", "raterId");
 
 -- AddForeignKey
@@ -103,6 +118,12 @@ ALTER TABLE "requests" ADD CONSTRAINT "requests_posterId_fkey" FOREIGN KEY ("pos
 
 -- AddForeignKey
 ALTER TABLE "requests" ADD CONSTRAINT "requests_helperId_fkey" FOREIGN KEY ("helperId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "request_interests" ADD CONSTRAINT "request_interests_requestId_fkey" FOREIGN KEY ("requestId") REFERENCES "requests"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "request_interests" ADD CONSTRAINT "request_interests_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "messages" ADD CONSTRAINT "messages_requestId_fkey" FOREIGN KEY ("requestId") REFERENCES "requests"("id") ON DELETE CASCADE ON UPDATE CASCADE;
