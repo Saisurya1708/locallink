@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useStore } from '../store/useStore';
 
+const SOCKET_URL = 'https://locallink-production-88e8.up.railway.app';
+
 let socketInstance: Socket | null = null;
 
 export function useSocket(): Socket | null {
@@ -12,7 +14,7 @@ export function useSocket(): Socket | null {
     if (!token) return;
 
     if (!socketInstance || !socketInstance.connected) {
-      socketInstance = io(import.meta.env.VITE_SOCKET_URL || '', {
+      socketInstance = io(SOCKET_URL, {
         auth: { token },
         transports: ['websocket'],
       });
@@ -20,9 +22,7 @@ export function useSocket(): Socket | null {
 
     socketRef.current = socketInstance;
 
-    return () => {
-      // Don't disconnect on component unmount — keep alive for notifications
-    };
+    return () => {};
   }, [token]);
 
   return socketRef.current;

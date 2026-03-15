@@ -1,8 +1,10 @@
 import axios from 'axios';
 import { useStore } from '../store/useStore';
 
+const API_URL = 'https://locallink-production-88e8.up.railway.app/api';
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: API_URL,
   withCredentials: false,
 });
 
@@ -23,7 +25,7 @@ api.interceptors.response.use(
       const { refreshToken, setAuth, clearAuth, user } = useStore.getState();
       if (!refreshToken) { clearAuth(); return Promise.reject(error); }
       try {
-        const { data } = await axios.post(`${import.meta.env.VITE_API_URL || '/api'}/auth/refresh`, { refreshToken });
+        const { data } = await axios.post(`${API_URL}/auth/refresh`, { refreshToken });
         setAuth(user!, data.accessToken, data.refreshToken);
         original.headers.Authorization = `Bearer ${data.accessToken}`;
         return api(original);
