@@ -1,18 +1,5 @@
-/**
- * End-to-End Encryption using Web Crypto API
- *
- * Protocol:
- *   1. Each user generates an ECDH P-256 key pair on registration.
- *   2. Public key is sent to server; private key stored in IndexedDB only.
- *   3. To derive a shared chat key: ECDH(myPrivateKey, theirPublicKey)
- *   4. Shared secret → HKDF → AES-GCM-256 key for message encryption.
- *   5. Each message has its own random 12-byte IV.
- */
-
 const DB_NAME = 'locallink-keys';
 const STORE_NAME = 'keypairs';
-
-// ── IndexedDB helpers ─────────────────────────────────────────────────────────
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -43,13 +30,11 @@ async function idbSet(key: string, value: CryptoKeyPair): Promise<void> {
   });
 }
 
-// ── Key generation ────────────────────────────────────────────────────────────
-
 export async function generateKeyPair(): Promise<{ keyPair: CryptoKeyPair; publicKeyB64: string }> {
   const keyPair = await crypto.subtle.generateKey(
     { name: 'ECDH', namedCurve: 'P-256' },
-    false, // private key NOT extractable — can't be stolen from JS
-    ['deriveKey']
+    false,
+    ['deriveKey', 'deriveBits']
   );
 
   const publicKeyRaw = await crypto.subtle.exportKey('spki', keyPair.publicKey);
@@ -64,8 +49,6 @@ export async function getMyKeyPair(): Promise<CryptoKeyPair | null> {
   return (await idbGet('myKeyPair')) || null;
 }
 
-// ── Shared key derivation ─────────────────────────────────────────────────────
-
 export async function deriveSharedKey(theirPublicKeyB64: string): Promise<CryptoKey> {
   const myKeyPair = await getMyKeyPair();
   if (!myKeyPair) throw new Error('No local key pair found. Please re-register.');
@@ -79,19 +62,38 @@ export async function deriveSharedKey(theirPublicKeyB64: string): Promise<Crypto
     []
   );
 
-  // Derive shared AES-GCM key via ECDH + HKDF
-  const sharedKey = await crypto.subtle.deriveKey(
+  // Step 1: derive raw ECDH shared bits (identical on both sides)
+  const sharedBits = await crypto.subtle.deriveBits(
     { name: 'ECDH', public: theirPublicKey },
     myKeyPair.privateKey,
+    256
+  );
+
+  // Step 2: import as HKDF key material
+  const hkdfKey = await crypto.subtle.importKey(
+    'raw',
+    sharedBits,
+    'HKDF',
+    false,
+    ['deriveKey']
+  );
+
+  // Step 3: derive AES-GCM-256 key via HKDF with fixed salt+info
+  const aesKey = await crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new Uint8Array(32),
+      info: new TextEncoder().encode('locallink-chat-v1'),
+    },
+    hkdfKey,
     { name: 'AES-GCM', length: 256 },
     false,
     ['encrypt', 'decrypt']
   );
 
-  return sharedKey;
+  return aesKey;
 }
-
-// ── Encrypt / Decrypt ─────────────────────────────────────────────────────────
 
 export async function encryptMessage(plaintext: string, sharedKey: CryptoKey): Promise<{ iv: string; ciphertext: string }> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
