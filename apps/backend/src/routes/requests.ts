@@ -8,7 +8,6 @@ import { io } from '../index';
 const router = Router();
 const prisma = new PrismaClient();
 
-// Haversine distance in meters
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -17,7 +16,7 @@ function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number)
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// Nearby requests - using Haversine (no PostGIS needed)
+// Nearby requests
 router.get('/nearby', requireAuth, apiLimiter,
   [query('lat').isFloat({ min: -90, max: 90 }), query('lng').isFloat({ min: -180, max: 180 })],
   async (req: AuthRequest, res: Response) => {
@@ -26,15 +25,18 @@ router.get('/nearby', requireAuth, apiLimiter,
 
     const lat = parseFloat(req.query.lat as string);
     const lng = parseFloat(req.query.lng as string);
+    const now = new Date();
 
     try {
-      // Fetch OPEN requests with a rough bounding box first (~500km), then filter precisely
       const requests = await prisma.request.findMany({
         where: {
           status: 'OPEN',
-          expiresAt: { OR: [{ equals: null }, { gt: new Date() }] } as any,
           centerLat: { gte: lat - 5, lte: lat + 5 },
           centerLng: { gte: lng - 5, lte: lng + 5 },
+          OR: [
+            { expiresAt: null },
+            { expiresAt: { gt: now } },
+          ],
         },
         include: {
           poster: { select: { id: true, username: true, rating: true } },
@@ -43,7 +45,6 @@ router.get('/nearby', requireAuth, apiLimiter,
         take: 200,
       });
 
-      // Filter by actual radius using Haversine
       const nearby = requests
         .map(r => ({
           ...r,
